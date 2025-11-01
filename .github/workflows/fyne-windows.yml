@@ -57,30 +57,47 @@ jobs:
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           go install github.com/fyne-io/fyne-cross@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Ensure Docker service running
         run: |
-          set -euxo pipefail
-          docker --version || true
-          sudo systemctl start docker || sudo service docker start || true
-          docker info || true
+          docker --version
+          sudo systemctl start docker
+          sudo usermod -aG docker $USER
+          docker info
 
       - name: Pre-pull fyne-cross windows image
         run: |
-          set -euxo pipefail
-          docker pull docker.io/fyneio/fyne-cross:windows
+          docker pull fyneio/fyne-cross:windows
+
+      - name: Verify project structure
+        run: |
+          ls -la cmd/discover_gui/
+          cat cmd/discover_gui/main.go | head -10
 
       - name: Build discover_gui for windows-amd64
-        env:
-          FYNE_CROSS_VERBOSE: "1"
-          FYNE_CROSS_IMAGE: "fyneio/fyne-cross:windows"
         run: |
-          set -euxo pipefail
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          fyne-cross windows --pull -arch=amd64 ./cmd/discover_gui
+          # Create a clean working directory
+          mkdir -p build-temp
+          cp -r cmd/discover_gui build-temp/
+          cp go.mod go.sum build-temp/
+          cd build-temp
+          
+          # Initialize go module if needed
+          go mod tidy
+          
+          # Build with fyne-cross
+          fyne-cross windows -arch=amd64 -output=discover_gui ./discover_gui
+
+      - name: List build output
+        run: |
+          find . -name "*.exe" -type f
+          ls -la fyne-cross/dist/windows-amd64/ || echo "Directory not found"
 
       - name: Upload discover_gui artifact
         uses: actions/upload-artifact@v4
         with:
           name: discover_gui-windows-amd64
-          path: fyne-cross/dist/windows-amd64/discover_gui.exe
+          path: |
+            fyne-cross/dist/windows-amd64/discover_gui.exe
+            build-temp/fyne-cross/dist/windows-amd64/discover_gui.exe
