@@ -914,21 +914,48 @@ func sendUDP(network string, laddr, raddr *net.UDPAddr, payload []byte) error {
 }
 
 func discover(port string, timeout time.Duration) ([]Device, error) {
+    targetPort := parsePort(port, 60000)
+    found := map[string]Device{}
+    
     // Use a single UDP socket to send broadcast and receive replies on the same port
     conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
     if err != nil {
-        return nil, err
+        return nil, fmt.Errorf("failed to create UDP socket: %v", err)
     }
     defer conn.Close()
     _ = conn.SetDeadline(time.Now().Add(timeout))
-
-    baddr := &net.UDPAddr{IP: net.IPv4bcast, Port: parsePort(port, 60000)}
+    
+    // Send broadcast to 255.255.255.255
+    baddr := &net.UDPAddr{IP: net.IPv4bcast, Port: targetPort}
     if _, err := conn.WriteToUDP([]byte("TF"), baddr); err != nil {
-        return nil, err
+        fmt.Printf("Failed to send broadcast to %s: %v\n", net.IPv4bcast, err)
     }
-
+    
+    // Also try sending to local network broadcast addresses
+    interfaces, _ := net.Interfaces()
+    for _, iface := range interfaces {
+        if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagBroadcast == 0 {
+            continue
+        }
+        addrs, _ := iface.Addrs()
+        for _, addr := range addrs {
+            if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+                // Calculate broadcast address for this network
+                broadcast := make(net.IP, 4)
+                for i := 0; i < 4; i++ {
+                    broadcast[i] = ipnet.IP.To4()[i] | ^ipnet.Mask[i]
+                }
+                // Send to this network's broadcast address
+                bcastAddr := &net.UDPAddr{IP: broadcast, Port: targetPort}
+                if _, err := conn.WriteToUDP([]byte("TF"), bcastAddr); err != nil {
+                    fmt.Printf("Failed to send broadcast to %s: %v\n", broadcast, err)
+                }
+            }
+        }
+    }
+    
+    // Listen for responses on the same socket
     buf := make([]byte, 2048)
-    found := map[string]Device{}
     for {
         n, from, err := conn.ReadFromUDP(buf)
         if err != nil {
@@ -942,6 +969,7 @@ func discover(port string, timeout time.Duration) ([]Device, error) {
             found[key] = d
         }
     }
+    
     // Convert map to slice
     out := make([]Device, 0, len(found))
     for _, d := range found {
