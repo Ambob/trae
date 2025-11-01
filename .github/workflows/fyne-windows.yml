@@ -40,7 +40,7 @@ jobs:
           path: cmd/page_viewer/page_viewer.exe
 
   discover_gui_windows:
-    name: Build discover_gui on Ubuntu with fyne-cross
+    name: Build discover_gui on Ubuntu with Go cross-compilation
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -53,22 +53,10 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Install fyne-cross
+      - name: Install cross-compilation dependencies
         run: |
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          go install github.com/fyne-io/fyne-cross@latest
-          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-
-      - name: Ensure Docker service running
-        run: |
-          docker --version
-          sudo systemctl start docker
-          sudo usermod -aG docker $USER
-          docker info
-
-      - name: Pre-pull fyne-cross windows image
-        run: |
-          docker pull fyneio/fyne-cross:windows
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
 
       - name: Verify project structure
         run: |
@@ -77,27 +65,16 @@ jobs:
 
       - name: Build discover_gui for windows-amd64
         run: |
-          # Create a clean working directory
-          mkdir -p build-temp
-          cp -r cmd/discover_gui build-temp/
-          cp go.mod go.sum build-temp/
-          cd build-temp
-          
-          # Initialize go module if needed
-          go mod tidy
-          
-          # Build with fyne-cross
-          fyne-cross windows -arch=amd64 -output=discover_gui ./discover_gui
+          cd cmd/discover_gui
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -ldflags="-s -w -H windowsgui" -o discover_gui.exe .
 
-      - name: List build output
+      - name: Verify build output
         run: |
-          find . -name "*.exe" -type f
-          ls -la fyne-cross/dist/windows-amd64/ || echo "Directory not found"
+          ls -la cmd/discover_gui/discover_gui.exe
+          file cmd/discover_gui/discover_gui.exe
 
       - name: Upload discover_gui artifact
         uses: actions/upload-artifact@v4
         with:
           name: discover_gui-windows-amd64
-          path: |
-            fyne-cross/dist/windows-amd64/discover_gui.exe
-            build-temp/fyne-cross/dist/windows-amd64/discover_gui.exe
+          path: cmd/discover_gui/discover_gui.exe
