@@ -58,15 +58,26 @@ jobs:
           export PATH="$(go env GOPATH)/bin:$PATH"
           go install github.com/fyne-io/fyne-cross@latest
 
-      - name: Ensure Docker is available
+      - name: Ensure Docker service running
         run: |
+          set -euxo pipefail
           docker --version || true
+          sudo systemctl start docker || sudo service docker start || true
           docker info || true
 
-      - name: Build discover_gui for windows-amd64
+      - name: Pre-pull fyne-cross windows image
         run: |
+          set -euxo pipefail
+          docker pull docker.io/fyneio/fyne-cross:windows
+
+      - name: Build discover_gui for windows-amd64
+        env:
+          FYNE_CROSS_VERBOSE: "1"
+          FYNE_CROSS_IMAGE: "fyneio/fyne-cross:windows"
+        run: |
+          set -euxo pipefail
           export PATH="$(go env GOPATH)/bin:$PATH"
-          fyne-cross windows -arch=amd64 ./cmd/discover_gui
+          fyne-cross windows --pull -arch=amd64 ./cmd/discover_gui
 
       - name: Upload discover_gui artifact
         uses: actions/upload-artifact@v4
