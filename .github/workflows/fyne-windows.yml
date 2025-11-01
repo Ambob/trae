@@ -1,4 +1,4 @@
-name: Build Fyne Windows EXEs
+name: Build Windows EXEs
 
 on:
   workflow_dispatch:
@@ -22,10 +22,15 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.21'
 
-      - name: Install fyne-cross
-        run: go install github.com/fyne-io/fyne-cross@latest
+      - name: Install dependencies
+        run: |
+          # Install fyne-cross for GUI app
+          go install github.com/fyne-io/fyne-cross@latest
+          # Install cross-compilation tools for webview
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-x86-64
 
       - name: Ensure Docker is running
         run: |
@@ -33,20 +38,24 @@ jobs:
           sudo systemctl start docker || sudo service docker start || true
           docker info || true
 
-      - name: Build page_viewer for windows-amd64
+      - name: Build page_viewer for windows-amd64 (webview)
         run: |
-          export PATH="$(go env GOPATH)/bin:$PATH"
-          fyne-cross windows -arch=amd64 -dir ./cmd/page_viewer -name page_viewer
+          cd cmd/page_viewer
+          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -ldflags="-s -w" -o page_viewer.exe .
 
-      - name: Build discover_gui for windows-amd64
+      - name: Build discover_gui for windows-amd64 (fyne)
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
-          fyne-cross windows -arch=amd64 -dir ./cmd/discover_gui -name discover_gui
+          fyne-cross windows -arch=amd64 ./cmd/discover_gui
+
+      - name: Collect binaries
+        run: |
+          mkdir -p dist
+          cp cmd/page_viewer/page_viewer.exe dist/
+          cp fyne-cross/dist/windows-amd64/discover_gui.exe dist/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows-amd64-binaries
-          path: |
-            cmd/page_viewer/fyne-cross/dist/windows-amd64/page_viewer.exe
-            cmd/discover_gui/fyne-cross/dist/windows-amd64/discover_gui.exe
+          path: dist/*.exe
