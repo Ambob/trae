@@ -11,7 +11,36 @@ on:
       - '.github/workflows/fyne-windows.yml'
 
 jobs:
-  windows:
+  page_viewer_windows:
+    name: Build page_viewer on Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build page_viewer.exe (webview)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd cmd/page_viewer
+          export CGO_ENABLED=1
+          go build -ldflags "-s -w" -o page_viewer.exe .
+
+      - name: Upload page_viewer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: page_viewer-windows-amd64
+          path: cmd/page_viewer/page_viewer.exe
+
+  discover_gui_windows:
+    name: Build discover_gui on Ubuntu with fyne-cross
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -24,38 +53,23 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Install dependencies
+      - name: Install fyne-cross
         run: |
-          # Install fyne-cross for GUI app
+          export PATH="$(go env GOPATH)/bin:$PATH"
           go install github.com/fyne-io/fyne-cross@latest
-          # Install cross-compilation tools for webview
-          sudo apt-get update
-          sudo apt-get install -y gcc-mingw-w64-x86-64
 
-      - name: Ensure Docker is running
+      - name: Ensure Docker is available
         run: |
           docker --version || true
-          sudo systemctl start docker || sudo service docker start || true
           docker info || true
 
-      - name: Build page_viewer for windows-amd64 (webview)
-        run: |
-          cd cmd/page_viewer
-          CGO_ENABLED=1 GOOS=windows GOARCH=amd64 CC=x86_64-w64-mingw32-gcc go build -ldflags="-s -w" -o page_viewer.exe .
-
-      - name: Build discover_gui for windows-amd64 (fyne)
+      - name: Build discover_gui for windows-amd64
         run: |
           export PATH="$(go env GOPATH)/bin:$PATH"
           fyne-cross windows -arch=amd64 ./cmd/discover_gui
 
-      - name: Collect binaries
-        run: |
-          mkdir -p dist
-          cp cmd/page_viewer/page_viewer.exe dist/
-          cp fyne-cross/dist/windows-amd64/discover_gui.exe dist/
-
-      - name: Upload artifacts
+      - name: Upload discover_gui artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-amd64-binaries
-          path: dist/*.exe
+          name: discover_gui-windows-amd64
+          path: fyne-cross/dist/windows-amd64/discover_gui.exe
