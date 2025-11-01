@@ -1,0 +1,52 @@
+name: Build Fyne Windows EXEs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'cmd/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/fyne-windows.yml'
+
+jobs:
+  windows:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
+
+      - name: Ensure Docker is running
+        run: |
+          docker --version || true
+          sudo systemctl start docker || sudo service docker start || true
+          docker info || true
+
+      - name: Build page_viewer for windows-amd64
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          fyne-cross windows -arch=amd64 -dir ./cmd/page_viewer -name page_viewer
+
+      - name: Build discover_gui for windows-amd64
+        run: |
+          export PATH="$(go env GOPATH)/bin:$PATH"
+          fyne-cross windows -arch=amd64 -dir ./cmd/discover_gui -name discover_gui
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64-binaries
+          path: |
+            cmd/page_viewer/fyne-cross/dist/windows-amd64/page_viewer.exe
+            cmd/discover_gui/fyne-cross/dist/windows-amd64/discover_gui.exe
