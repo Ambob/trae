@@ -917,21 +917,22 @@ func discover(port string, timeout time.Duration) ([]Device, error) {
     targetPort := parsePort(port, 60000)
     found := map[string]Device{}
     
-    // Use a single UDP socket to send broadcast and receive replies on the same port
-    conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+    // Use ListenPacket for better cross-platform compatibility
+    conn, err := net.ListenPacket("udp4", ":0")
     if err != nil {
         return nil, fmt.Errorf("failed to create UDP socket: %v", err)
     }
     defer conn.Close()
+    
+    // Set deadline for receiving responses
     _ = conn.SetDeadline(time.Now().Add(timeout))
     
-    // Send broadcast to 255.255.255.255
-    baddr := &net.UDPAddr{IP: net.IPv4bcast, Port: targetPort}
-    if _, err := conn.WriteToUDP([]byte("TF"), baddr); err != nil {
-        fmt.Printf("Failed to send broadcast to %s: %v\n", net.IPv4bcast, err)
+    // Prepare broadcast addresses
+    broadcastAddresses := []string{
+        "255.255.255.255", // Global broadcast
     }
     
-    // Also try sending to local network broadcast addresses
+    // Add local network broadcast addresses
     interfaces, _ := net.Interfaces()
     for _, iface := range interfaces {
         if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagBroadcast == 0 {
@@ -945,28 +946,40 @@ func discover(port string, timeout time.Duration) ([]Device, error) {
                 for i := 0; i < 4; i++ {
                     broadcast[i] = ipnet.IP.To4()[i] | ^ipnet.Mask[i]
                 }
-                // Send to this network's broadcast address
-                bcastAddr := &net.UDPAddr{IP: broadcast, Port: targetPort}
-                if _, err := conn.WriteToUDP([]byte("TF"), bcastAddr); err != nil {
-                    fmt.Printf("Failed to send broadcast to %s: %v\n", broadcast, err)
-                }
+                broadcastAddresses = append(broadcastAddresses, broadcast.String())
             }
         }
     }
     
-    // Listen for responses on the same socket
+    // Send broadcast messages to all addresses
+    for _, bcastIP := range broadcastAddresses {
+        bcastAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("%s:%d", bcastIP, targetPort))
+        if err != nil {
+            fmt.Printf("Failed to resolve broadcast address %s: %v\n", bcastIP, err)
+            continue
+        }
+        
+        // Send broadcast message
+        if _, err := conn.WriteTo([]byte("TF"), bcastAddr); err != nil {
+            fmt.Printf("Failed to send broadcast to %s: %v\n", bcastIP, err)
+        }
+    }
+    
+    // Listen for responses
     buf := make([]byte, 2048)
     for {
-        n, from, err := conn.ReadFromUDP(buf)
+        n, from, err := conn.ReadFrom(buf)
         if err != nil {
             // Deadline or other error ends discovery
             break
         }
         msg := strings.TrimSpace(string(buf[:n]))
         if strings.HasPrefix(strings.ToUpper(msg), "TF|") {
-            d := parseDiscovery(from, msg)
-            key := from.String()
-            found[key] = d
+            if fromUDP, ok := from.(*net.UDPAddr); ok {
+                d := parseDiscovery(fromUDP, msg)
+                key := from.String()
+                found[key] = d
+            }
         }
     }
     
